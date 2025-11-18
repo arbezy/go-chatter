@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"html/template"
 	"log"
+	"sync"
 )
 
 type Hub struct {
+	mu sync.RWMutex
+
 	clients  map[*Client]bool
 	messages []*Message
 
@@ -24,13 +27,14 @@ func NewHub() *Hub {
 	}
 }
 
-// not concurrent
 // TODO: add a lock to hub (and acquire lock in this func)
 func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
+			h.mu.Lock()
 			h.clients[client] = true
+			h.mu.Unlock()
 
 			log.Printf("client registered &s", client.id)
 
@@ -39,13 +43,16 @@ func (h *Hub) Run() {
 			}
 		case client := <-h.unregister:
 			// first check if exists
+			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
 				close(client.send)
 				log.Printf("client unregistered %s", client.id)
 
 				delete(h.clients, client)
 			}
+			h.mu.Unlock()
 		case msg := <-h.broadcast:
+			h.mu.RLock()
 			h.messages = append(h.messages, msg)
 
 			for client := range h.clients {
@@ -56,6 +63,7 @@ func (h *Hub) Run() {
 					delete(h.clients, client)
 				}
 			}
+			h.mu.RUnlock()
 		}
 	}
 }
